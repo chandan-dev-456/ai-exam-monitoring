@@ -15,7 +15,7 @@ export default function Home() {
                     {/* Start Exam Button */}
                     <button 
                         className=""
-                        onClick={() => navigate('/face-register')}
+                        onClick={() => navigate('/register-face')}
                     >
                         <i className="bi bi-pencil-square me-2"></i>
                         Start Exam
