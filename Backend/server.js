@@ -156,7 +156,107 @@ app.post('/api/start-exam', (req, res) => {
         message: '✅ Exam started'
     });
 });
+// ==================== EXAM MONITORING ENDPOINTS ====================
 
+// Store active exam sessions with their registered face encoding
+const activeExams = new Map();
+
+// Start exam monitoring
+app.post('/api/start-monitoring', async (req, res) => {
+    const { sessionId, regNo } = req.body;
+    
+    // Store session
+    activeExams.set(sessionId, {
+        regNo,
+        violations: [],
+        startTime: new Date(),
+        lastFrame: null
+    });
+    
+    res.json({ success: true, message: 'Monitoring started' });
+});
+
+// Analyze frame for violations
+app.post('/api/analyze-frame', async (req, res) => {
+    const { sessionId, frame } = req.body;
+    
+    try {
+        // Call Python to analyze the frame
+        const pythonScript = path.join(__dirname, '../ai_module/exam_monitor.py');
+        const pythonProcess = spawn('python', [pythonScript]);
+        
+        let result = '';
+        let error = '';
+        
+        const inputData = JSON.stringify({ 
+            task: 'analyze_frame',
+            sessionId,
+            frame,
+            regNo: activeExams.get(sessionId)?.regNo
+        });
+        
+        pythonProcess.stdin.write(inputData + '\n');
+        pythonProcess.stdin.end();
+        
+        pythonProcess.stdout.on('data', (data) => {
+            result += data.toString();
+        });
+        
+        pythonProcess.stderr.on('data', (data) => {
+            error += data.toString();
+            console.error('Python error:', data.toString());
+        });
+        
+        pythonProcess.on('close', (code) => {
+            try {
+                const analysis = JSON.parse(result);
+                
+                // If violation detected, log it
+                if (analysis.violation) {
+                    const session = activeExams.get(sessionId);
+                    if (session) {
+                        session.violations.push({
+                            type: analysis.violation,
+                            time: new Date().toISOString(),
+                            details: analysis.details
+                        });
+                        
+                        // Check if should terminate (3 violations)
+                        const violationCount = session.violations.filter(
+                            v => v.type === analysis.violation
+                        ).length;
+                        
+                        if (violationCount >= 3) {
+                            analysis.terminate = true;
+                            analysis.terminateReason = `Multiple ${analysis.violation} violations`;
+                        }
+                    }
+                }
+                
+                res.json(analysis);
+            } catch (e) {
+                res.json({ success: false, error: 'Parse error' });
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// End exam
+app.post('/api/end-exam-monitoring', (req, res) => {
+    const { sessionId } = req.body;
+    const session = activeExams.get(sessionId);
+    
+    if (session) {
+        console.log(`📊 Exam ${sessionId} ended. Violations:`, session.violations);
+        activeExams.delete(sessionId);
+        res.json({ success: true, violations: session.violations });
+    } else {
+        res.json({ success: false, message: 'Session not found' });
+    }
+});
 // ==================== HEALTH CHECK ====================
 app.get('/api/health', (req, res) => {
     res.json({ 

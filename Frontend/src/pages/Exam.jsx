@@ -12,13 +12,16 @@ export default function Exam() {
     const [fullscreen, setFullscreen] = useState(true);
     const [warning, setWarning] = useState('');
     const [showWarning, setShowWarning] = useState(false);
+    const [faceStatus, setFaceStatus] = useState('Initializing...');
 
     // Refs
     const videoRef = useRef(null);
+    const canvasRef = useRef(null);
     const wsRef = useRef(null);
     const violationCounts = useRef({
         fullscreen: 0,
-        tabSwitch: 0
+        tabSwitch: 0,
+        multipleFaces: 0
     });
 
     // ========== INITIAL SETUP ==========
@@ -57,8 +60,11 @@ export default function Exam() {
             });
         }, 1000);
 
-        // Try to start camera for proctoring (optional)
+        // Start camera for face detection
         startCamera();
+
+        // Start face detection loop
+        startFaceDetection();
 
         // Cleanup
         return () => {
@@ -73,6 +79,116 @@ export default function Exam() {
             }
         };
     }, []);
+
+    // ========== CAMERA SETUP ==========
+    const startCamera = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: {
+                    width: 640,
+                    height: 480
+                },
+                audio: false 
+            });
+            
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                setFaceStatus('Camera active');
+            }
+        } catch (error) {
+            console.log('Camera access not available:', error);
+            setFaceStatus('Camera unavailable');
+        }
+    };
+
+    // ========== FACE DETECTION ==========
+    const startFaceDetection = () => {
+        // Load OpenCV.js for face detection
+        const script = document.createElement('script');
+        script.src = 'https://docs.opencv.org/4.5.5/opencv.js';
+        script.onload = () => {
+            console.log('OpenCV loaded');
+            detectFaces();
+        };
+        document.body.appendChild(script);
+    };
+
+    const detectFaces = () => {
+        if (!examActive || !videoRef.current || !videoRef.current.srcObject) {
+            setTimeout(detectFaces, 1000);
+            return;
+        }
+
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Load face cascade classifier
+            const faceCascade = new cv.CascadeClassifier();
+            faceCascade.load('haarcascade_frontalface_default.xml');
+            
+            // Convert canvas to mat
+            const src = cv.imread(canvas);
+            const gray = new cv.Mat();
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            
+            // Detect faces
+            const faces = new cv.RectVector();
+            faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0);
+            
+            const faceCount = faces.size();
+            
+            // Check for multiple faces
+            if (faceCount > 1) {
+                // Multiple faces detected - violation!
+                violationCounts.current.multipleFaces += 1;
+                
+                const newViolation = {
+                    type: 'multiple_faces',
+                    count: violationCounts.current.multipleFaces,
+                    time: new Date().toLocaleTimeString(),
+                    details: { faceCount }
+                };
+                
+                setViolations(prev => [...prev, newViolation]);
+                setFaceStatus(`⚠️ ${faceCount} faces detected!`);
+                
+                // Log to backend
+                logViolationToBackend('multiple_faces', violationCounts.current.multipleFaces, { faceCount });
+                
+                // Show warning
+                const remaining = 3 - violationCounts.current.multipleFaces;
+                setWarning(`⚠️ Warning ${violationCounts.current.multipleFaces}/3: Multiple faces detected! ${remaining} more and exam will terminate`);
+                setShowWarning(true);
+                
+                // Auto hide warning after 3 seconds
+                setTimeout(() => setShowWarning(false), 3000);
+
+                // Check if exceeded limit (3 violations)
+                if (violationCounts.current.multipleFaces >= 3) {
+                    terminateExam('Multiple faces detected too many times (3 times)');
+                }
+            } else if (faceCount === 1) {
+                setFaceStatus('✅ One face detected');
+            } else {
+                setFaceStatus('❌ No face detected');
+            }
+            
+            // Cleanup
+            src.delete();
+            gray.delete();
+            faces.delete();
+        }
+        
+        // Check again after 2 seconds
+        setTimeout(detectFaces, 2000);
+    };
 
     // ========== FULLSCREEN HANDLING ==========
     const enterFullscreen = () => {
@@ -98,8 +214,7 @@ export default function Exam() {
                 time: new Date().toLocaleTimeString()
             };
             
-            const updatedViolations = [...violations, newViolation];
-            setViolations(updatedViolations);
+            setViolations(prev => [...prev, newViolation]);
             
             // Log to backend
             logViolationToBackend('fullscreen_exit', violationCounts.current.fullscreen);
@@ -116,7 +231,7 @@ export default function Exam() {
                 }
             }, 1000);
 
-            // Check if exceeded limit
+            // Check if exceeded limit (5 violations)
             if (violationCounts.current.fullscreen >= 5) {
                 terminateExam('Exited fullscreen too many times (5 times)');
             }
@@ -135,8 +250,7 @@ export default function Exam() {
                 time: new Date().toLocaleTimeString()
             };
             
-            const updatedViolations = [...violations, newViolation];
-            setViolations(updatedViolations);
+            setViolations(prev => [...prev, newViolation]);
             
             // Log to backend
             logViolationToBackend('tab_switch', violationCounts.current.tabSwitch);
@@ -146,7 +260,7 @@ export default function Exam() {
             setWarning(`⚠️ Warning ${violationCounts.current.tabSwitch}/5: Do not switch tabs! ${remaining} more and exam will terminate`);
             setShowWarning(true);
 
-            // Check if exceeded limit
+            // Check if exceeded limit (5 violations)
             if (violationCounts.current.tabSwitch >= 5) {
                 terminateExam('Switched tabs too many times (5 times)');
             }
@@ -179,22 +293,6 @@ export default function Exam() {
             
             // Auto hide warning after 3 seconds
             setTimeout(() => setShowWarning(false), 3000);
-        }
-    };
-
-    // ========== CAMERA (optional) ==========
-    const startCamera = async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: true,
-                audio: false 
-            });
-            
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
-        } catch (error) {
-            console.log('Camera access not available:', error);
         }
     };
 
@@ -315,6 +413,7 @@ export default function Exam() {
                                 <ul className="list-unstyled mt-3">
                                     <li>Fullscreen exits: {violationCounts.current.fullscreen}/5</li>
                                     <li>Tab switches: {violationCounts.current.tabSwitch}/5</li>
+                                    <li>Multiple faces: {violationCounts.current.multipleFaces}/3</li>
                                 </ul>
                                 <div className="spinner-border text-danger mt-4"></div>
                                 <p className="mt-2">Redirecting to results...</p>
@@ -328,6 +427,9 @@ export default function Exam() {
 
     return (
         <div className="min-vh-100 bg-light">
+            {/* Hidden canvas for face detection */}
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+
             {/* Header with status */}
             <div className={`${fullscreen ? 'bg-dark' : 'bg-danger'} text-white py-3 px-4 sticky-top`}>
                 <div className="container-fluid">
@@ -338,13 +440,13 @@ export default function Exam() {
                                 {fullname} ({regNo})
                             </h5>
                         </div>
-                        <div className="col-md-3 text-center">
+                        <div className="col-md-2 text-center">
                             <h4 className="mb-0">
                                 <i className="bi bi-clock me-2"></i>
                                 {formatTime(timeLeft)}
                             </h4>
                         </div>
-                        <div className="col-md-3 text-center">
+                        <div className="col-md-4 text-center">
                             {!fullscreen && (
                                 <span className="badge bg-warning text-dark p-2">
                                     <i className="bi bi-exclamation-triangle-fill me-1"></i>
@@ -361,7 +463,7 @@ export default function Exam() {
                         <div className="col-md-3 text-end">
                             <span className="text-white-50">
                                 <i className="bi bi-exclamation-triangle me-1"></i>
-                                {violationCounts.current.fullscreen + violationCounts.current.tabSwitch} violations
+                                {violationCounts.current.fullscreen + violationCounts.current.tabSwitch + violationCounts.current.multipleFaces} violations
                             </span>
                         </div>
                     </div>
@@ -379,7 +481,7 @@ export default function Exam() {
             {/* Main exam content */}
             <div className="container mt-4">
                 <div className="row">
-                    {/* Camera feed (optional) */}
+                    {/* Camera feed */}
                     <div className="col-md-3">
                         <div className="card mb-3">
                             <div className="card-header bg-secondary text-white py-2">
@@ -390,6 +492,7 @@ export default function Exam() {
                                     ref={videoRef}
                                     autoPlay
                                     muted
+                                    playsInline
                                     className="w-100"
                                     style={{ 
                                         transform: 'scaleX(-1)',
@@ -397,6 +500,18 @@ export default function Exam() {
                                         objectFit: 'cover'
                                     }}
                                 />
+                            </div>
+                            <div className="card-footer p-2">
+                                <small>
+                                    <strong>Status:</strong>{' '}
+                                    <span className={
+                                        faceStatus.includes('✅') ? 'text-success' :
+                                        faceStatus.includes('⚠️') ? 'text-warning' :
+                                        faceStatus.includes('❌') ? 'text-danger' : ''
+                                    }>
+                                        {faceStatus}
+                                    </span>
+                                </small>
                             </div>
                         </div>
                         
@@ -435,6 +550,21 @@ export default function Exam() {
                                         ></div>
                                     </div>
                                 </div>
+
+                                <div className="mb-2">
+                                    <div className="d-flex justify-content-between">
+                                        <span>Multiple faces:</span>
+                                        <span className={`badge ${violationCounts.current.multipleFaces >= 3 ? 'bg-danger' : 'bg-warning'}`}>
+                                            {violationCounts.current.multipleFaces}/3
+                                        </span>
+                                    </div>
+                                    <div className="progress" style={{ height: '5px' }}>
+                                        <div 
+                                            className="progress-bar bg-warning" 
+                                            style={{ width: `${(violationCounts.current.multipleFaces / 3) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -459,7 +589,7 @@ export default function Exam() {
                                 </div>
                                 
                                 <div className="mb-4">
-                                    <h6>2. What is useState in React?</h6>
+                                    <h6>2. What is useState?</h6>
                                     <div className="form-check">
                                         <input className="form-check-input" type="radio" name="q2" id="q2a" />
                                         <label className="form-check-label" htmlFor="q2a">A hook for state management</label>
@@ -483,9 +613,9 @@ export default function Exam() {
                                 <p className="small mb-1"><strong>Session:</strong> {sessionId?.substring(0, 8)}...</p>
                                 <p className="small mb-1"><strong>Rules:</strong></p>
                                 <ul className="small text-muted ps-3">
-                                    <li>Stay in fullscreen</li>
-                                    <li>Don't switch tabs</li>
-                                    <li>5 violations = termination</li>
+                                    <li>Stay in fullscreen (5 exits = termination)</li>
+                                    <li>Don't switch tabs (5 switches = termination)</li>
+                                    <li>Only one face allowed (3 violations = termination)</li>
                                 </ul>
                                 
                                 <button 
@@ -507,7 +637,7 @@ export default function Exam() {
                                 <div className="card-body p-2" style={{ maxHeight: '150px', overflowY: 'auto' }}>
                                     {violations.slice(-3).map((v, i) => (
                                         <div key={i} className="small text-danger border-bottom pb-1 mb-1">
-                                            ⚠️ {v.type} at {v.time}
+                                            ⚠️ {v.type} at {v.time} {v.details?.faceCount ? `(${v.details.faceCount} faces)` : ''}
                                         </div>
                                     ))}
                                 </div>
