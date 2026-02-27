@@ -94,105 +94,110 @@ export default function RegisterFace() {
     };
 
     const handleSubmit = async (e) => {
-    e.preventDefault();
+        e.preventDefault();
 
-    const fullname = e.target.fullname.value;
-    const regNo = e.target.RegNo.value;
+        const fullname = e.target.fullname.value;
+        const regNo = e.target.RegNo.value;
 
-    if (!capturedPhoto || !uploadedPreview) {
-        alert('Please capture and upload photos');
-        return;
-    }
-
-    setIsSubmitting(true);
-    setResult(null);
-    setMatchResult(null);
-
-    try {
-        console.log('📤 Sending comparison request...');
-        
-        // 1. Compare faces
-        const compareRes = await fetch('http://localhost:5000/api/compare-faces', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-                capturedPhoto: capturedPhoto,
-                uploadedPhoto: uploadedPreview
-            })
-        });
-
-        if (!compareRes.ok) {
-            throw new Error(`HTTP error! status: ${compareRes.status}`);
+        if (!capturedPhoto || !uploadedPreview) {
+            alert('Please capture and upload photos');
+            return;
         }
 
-        const compareData = await compareRes.json();
-        console.log('📊 Comparison result:', compareData);
+        setIsSubmitting(true);
+        setResult(null);
+        setMatchResult(null);
 
-        // Set match result for display
-        setMatchResult({
-            match_percentage: compareData.match_percentage || 0,
-            message: compareData.message || `Face match: ${compareData.match_percentage}%`
-        });
+        try {
+            console.log('📤 Sending comparison request...');
 
-        if (compareData.success && compareData.match) {
-            // 2. Register face
-            const registerRes = await fetch('http://localhost:5000/api/register-face', {
+            // 1. Compare faces (this stays the same)
+            const compareRes = await fetch('http://localhost:5000/api/compare-faces', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fullname, regNo })
-            });
-            
-            const registerData = await registerRes.json();
-            console.log('📝 Register result:', registerData);
-
-            // 3. Start exam
-            const examRes = await fetch('http://localhost:5000/api/start-exam', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ regNo })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    capturedPhoto: capturedPhoto,
+                    uploadedPhoto: uploadedPreview
+                })
             });
 
-            const examData = await examRes.json();
-            console.log('🎯 Exam result:', examData);
+            if (!compareRes.ok) {
+                throw new Error(`HTTP error! status: ${compareRes.status}`);
+            }
 
-            // Show success message
-            setResult({
-                success: true,
-                message: `✅ Verified! Match: ${compareData.match_percentage}%`
+            const compareData = await compareRes.json();
+            console.log('📊 Comparison result:', compareData);
+
+            // Set match result for display
+            setMatchResult({
+                match_percentage: compareData.match_percentage || 0,
+                message: compareData.message || `Face match: ${compareData.match_percentage}%`
             });
 
-            // Navigate to exam page after short delay
-            setTimeout(() => {
-                navigate('/start-exam', { 
-                    state: { 
-                        sessionId: examData.sessionId,
-                        regNo: regNo,
-                        fullname: fullname 
-                    } 
+            if (compareData.success && compareData.match) {
+                // ========== UPDATED: Send ID photo to store encoding ==========
+                const registerRes = await fetch('http://localhost:5000/api/register-face', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // 👇 Send uploadedPreview (ID photo) to store encoding
+                    body: JSON.stringify({
+                        fullname,
+                        regNo,
+                        uploadedPhoto: uploadedPreview  // This gets encoded and stored
+                    })
                 });
-            }, 2000);
 
-        } else {
-            // Show failure message
+                const registerData = await registerRes.json();
+                console.log('📝 Register result:', registerData);
+
+                // 3. Start exam (this stays the same)
+                const examRes = await fetch('http://localhost:5000/api/start-exam', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ regNo })
+                });
+
+                const examData = await examRes.json();
+                console.log('🎯 Exam result:', examData);
+
+                // Show success message
+                setResult({
+                    success: true,
+                    message: `✅ Verified! Match: ${compareData.match_percentage}%`
+                });
+
+                // Navigate to exam page after short delay
+                setTimeout(() => {
+                    navigate('/exam', { 
+                        state: {
+                            sessionId: examData.sessionId,
+                            regNo: regNo,
+                            fullname: fullname
+                        }
+                    });
+                }, 2000);
+
+            } else {
+                // Show failure message
+                setResult({
+                    success: false,
+                    message: `❌ Verification failed: ${compareData.match_percentage}% match (need 70%)`
+                });
+            }
+
+        } catch (error) {
+            console.error('❌ Error:', error);
             setResult({
                 success: false,
-                message: `❌ Verification failed: ${compareData.match_percentage}% match (need 70%)`
+                message: 'Error: ' + error.message + '\nMake sure backend is running on port 5000'
             });
+        } finally {
+            setIsSubmitting(false);
         }
-
-    } catch (error) {
-        console.error('❌ Error:', error);
-        setResult({
-            success: false,
-            message: 'Error: ' + error.message + '\nMake sure backend is running on port 5000'
-        });
-    } finally {
-        setIsSubmitting(false);
-    }
-};
+    };
 
     const clearAll = () => {
         setCapturedPhoto(null);

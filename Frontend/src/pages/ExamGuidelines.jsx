@@ -1,12 +1,14 @@
-
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
 const Exam = () => {
+  const navigate = useNavigate();
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
 
   const handleStartExam = () => {
     if (agreeTerms) {
-      alert("Exam is starting! Good luck!");
+      navigate('/register-face')
     } else {
       setShowWarning(true);
       setTimeout(() => setShowWarning(false), 3000);
@@ -17,7 +19,7 @@ const Exam = () => {
     <div className="container py-4">
       <div className="card shadow-lg border-0 rounded-4">
         <div className="card-body p-4 p-md-5">
-          
+
           {/* Header */}
           <div className="text-center mb-5">
             <h1 className="display-5 fw-bold text-primary mb-3">
@@ -219,9 +221,9 @@ const Exam = () => {
           <div className="card bg-light border-0 mb-4">
             <div className="card-body p-4">
               <div className="form-check mb-4">
-                <input 
-                  className="form-check-input" 
-                  type="checkbox" 
+                <input
+                  className="form-check-input"
+                  type="checkbox"
                   id="agreeCheck"
                   checked={agreeTerms}
                   onChange={(e) => setAgreeTerms(e.target.checked)}
@@ -232,15 +234,15 @@ const Exam = () => {
               </div>
 
               <div className="d-flex gap-3 mb-3">
-                <button 
+                <button
                   className="btn btn-primary flex-grow-1 py-3 fw-bold"
                   onClick={handleStartExam}
                 >
                   🚀 Start Exam
                 </button>
-                <button className="btn btn-outline-primary flex-grow-1 py-3 fw-bold">
+                {/* <button className="btn btn-outline-primary flex-grow-1 py-3 fw-bold">
                   📝 Practice Test
-                </button>
+                </button> */}
               </div>
 
               <p className="text-secondary text-center small mb-0 fst-italic">
