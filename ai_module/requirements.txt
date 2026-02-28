@@ -1,6 +1,11 @@
-opencv-python
-numpy
-Pillow
-mediapipe   
-SpeechRecognition
-scipy
+# FACE DETECTION AND PROCESSING
+opencv-python==4.8.1.78          # Face detection, image processing
+numpy==1.24.3                     # Array operations, math calculations
+
+# AUDIO DETECTION (optional)
+SpeechRecognition==3.10.0         # Voice detection during exam
+# PyAudio==0.2.11                  # Uncomment if you need microphone (Windows users: use pipwin)
+
+# UTILITIES
+scipy==1.11.4                      # Scientific computations for face comparison
+Pillow==10.0.1                      # Image handling utilities
